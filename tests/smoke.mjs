@@ -322,4 +322,28 @@ assert.equal((pruned.match(/^- id: llm$/gm) ?? []).length, 1)
 assert.equal(module.writeDisabledRows(patchFile, new Map(), new Set(['fresh-row'])).changed, false)
 rmSync(patchDir, { recursive: true, force: true })
 
+// ---- browser half ----
+
+/**
+ * The client half ships one dictionary per locale. A key present in only one of
+ * them stays invisible until somebody switches language, and the page cannot
+ * catch it at runtime, so it is checked from the source here.
+ */
+const clientSource = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+/** Every top-level dictionary key between two markers. */
+const dictionaryKeys = (from, to) => {
+  const block = clientSource.slice(clientSource.indexOf(from), clientSource.indexOf(to))
+  return [...block.matchAll(/^\s{6}([A-Za-z][A-Za-z0-9]*):/gm)].map((match) => match[1])
+}
+const zhKeys = dictionaryKeys('const zh = {', 'const en = {')
+const enKeys = dictionaryKeys('const en = {', '// Theme tokens')
+assert.ok(zhKeys.length > 20, 'the Chinese dictionary was found')
+assert.deepEqual(zhKeys, enKeys, 'both dictionaries carry the same keys')
+assert.equal(new Set(zhKeys).size, zhKeys.length, 'no dictionary key is declared twice')
+
+// A browser half may only import what the module table guarantees; a DSH client
+// package would be an internal API reached without a type check.
+const clientRequires = [...clientSource.matchAll(/require\(['"]([^'"]+)['"]\)/g)].map((match) => match[1])
+assert.deepEqual([...new Set(clientRequires)], ['react'], 'the client half imports only the baseline')
+
 console.log('dsh-preset-manager host smoke: all assertions passed')
