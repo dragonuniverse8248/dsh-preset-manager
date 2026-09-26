@@ -15,7 +15,7 @@
 ## 特性
 
 ### 选项卡「模式」
-![预设界面](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/images/%E9%A2%84%E8%AE%BE.png?raw=true）
+![预设界面](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/images/%E9%A2%84%E8%AE%BE.png?raw=true)
 
 两列短卡片，一行两个，高度与「全部插件开启」一致。
 
