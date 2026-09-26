@@ -1,0 +1,56 @@
+{
+  "name": "dsh-preset-manager",
+  "version": "1.0.0",
+  "description": "DSH 插件预设管理器：按组合批量切换插件启用状态，提供公共强制开启集合与可操纵插件白名单。",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node tests/smoke.mjs",
+    "check": "node --check index.js && node --check client.js && node tests/smoke.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "plugin",
+    "preset",
+    "profile",
+    "plugin-manager"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dragonuniverse8248/dsh-preset-manager.git"
+  },
+  "homepage": "https://github.com/dragonuniverse8248/dsh-preset-manager#readme",
+  "bugs": {
+    "url": "https://github.com/dragonuniverse8248/dsh-preset-manager/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings-general"
+      ]
+    }
+  }
+}

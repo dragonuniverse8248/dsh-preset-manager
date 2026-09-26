@@ -1,0 +1,5 @@
+# Bundle layer of dsh-preset-manager: the Host half owns the preset document
+# and the profile-plugin routes; the Client half registers the Settings page.
+- insert:
+    - id: preset-manager
+      name: 'dsh-preset-manager'
