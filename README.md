@@ -1,5 +1,5 @@
 # dsh-preset-manager
-
+[中文](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/README.md)|[english](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/README.en.md)
 > 给 DeepSeek Harness 的插件预设管理器：把一堆插件开关存成「预设」，一键整套切换。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -15,7 +15,7 @@
 ## 特性
 
 ### 选项卡「模式」
-![预设界面](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/images/%E9%A2%84%E8%AE%BE.png）
+![预设界面](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/images/%E9%A2%84%E8%AE%BE.png?raw=true）
 
 两列短卡片，一行两个，高度与「全部插件开启」一致。
 
@@ -25,7 +25,7 @@
 - 每次打开该选项卡都会重新检测一次状态是否一致。
 
 ### 选项卡「全局」
-![全局界面](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/images/%E5%85%A8%E5%B1%80.png)
+![全局界面](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/images/%E5%85%A8%E5%B1%80.png?raw=true)
 
 下拉添加式列表，管理**强制开启**集合。
 
@@ -35,7 +35,7 @@
 - 「添加」列表里已加入的插件显示为灰色不可再点，避免重复添加。
 
 ### 选项卡「预设」
-![模式界面](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/images/%E6%A8%A1%E5%BC%8F.png)
+![模式界面](https://github.com/dragonuniverse8248/dsh-preset-manager/blob/main/images/%E6%A8%A1%E5%BC%8F.png?raw=true)
 
 列表下拉式手风琴，一行一个预设，点击整行展开／收起。
 
