@@ -94,34 +94,32 @@ dsh plugin --profile web add dsh-preset-manager
 
 ## Operable-plugin allowlist
 
-The page **only shows and switches the plugins in the `manage` list**; every other plugin in the profile is treated as a lower-layer plugin and fully excluded:
+The page **shows and switches the plugins you installed**, with no list to maintain:
 
-- Default allowlist: `dsh-whale-widget`, `dsh-archive-manager`, `dshmarket`;
-- Matching: any one of **package name / Loader entry id / patch row id** matching is enough;
-- Plugins outside the allowlist:
-  - Do not appear in any of the three tabs;
-  - Are never changed by applying a preset, saving a global set, or a bulk switch;
-  - Are written into `excluded-plugins.json` — together with `entryId`, package name, patch row id, current switch state, and read-only flag — every time state is read, as a record of the exclusion list;
-  - Are always discarded server-side if an id outside the allowlist is mixed into a preset or global list submitted by the client.
+- **System plugins are necessarily excluded.** The 180-odd rows DSH itself supplies (`@deepseek-ai/…`, `cordis:…`) carry the
+  application, the settings page, and the HTTP server, so they never appear on the page and are never switched by a preset.
+- **Everything else is recognized by default**: any package the profile's `package.json` declares as a dependency — that is,
+  anything you installed with `dsh plugin` — becomes operable automatically.
+- **Installation origin decides, not the name**, so a newly installed plugin is manageable right away.
 
-To change the allowlist: add configuration to this plugin's row in the profile's `cordis.patch.yml` (this layer belongs to the user, so upgrading the plugin will not lose it):
+A **Whitelist** button in the page's toolbar adjusts the recognized set:
 
-```yaml
-- id: preset-manager
-  config:
-    manage:
-      - dsh-whale-widget
-      - dsh-archive-manager
-      - dshmarket
-      - your-own-plugin-package-name
-```
+- one switch per recognized plugin, operable by default; turning one off leaves it out of the page entirely (it is neither
+  shown nor changed by a preset or the global list), and turning it back on restores it;
+- saving writes `manage.exclude` in `config.json`, and the summary line reads "n operable ｜ m system necessarily excluded ｜ k left out";
+- system plugins are not listed and cannot be taken in through the page. That is deliberate: a preset that turned off
+  `web-startup` was measured to take `webserver` down and with it the whole page.
+
+Every excluded row is written to `excluded-plugins.json` with its `reason` (`system` / `whitelist`), so the exclusion can be audited.
+
+The toolbar also has a **Refresh** button that re-reads the current plugin list, so installing or removing a plugin needs no page reload.
 
 ## Data and persistence
 
 | File | Contents |
 |---|---|
 | `$DSH_HOME/dsh-preset-manager/config.json` | preset list, global set, currently active preset |
-| `$DSH_HOME/dsh-preset-manager/excluded-plugins.json` | list of excluded lower-layer plugins |
+| `$DSH_HOME/dsh-preset-manager/excluded-plugins.json` | excluded plugins, each with its `reason` (`system` / `whitelist`) |
 
 Plugin enablement/disablement is written into the profile's `cordis.patch.yml` in a single batch, then reconciled once by the HMR watcher and takes effect immediately — no restart needed.
 The built-in preset "All plugins on" is virtual (`all-on`) and is not written to any configuration file.
@@ -150,7 +148,7 @@ The profile's `node_modules` was installed with a different major version of pnp
 Just click the "All plugins on" card.
 
 **I don't want it to touch a certain plugin**
-Remove that plugin from `manage`; it goes back to being a lower-layer plugin, is not shown on the page at all, and will not be switched.
+Open **Whitelist** in the toolbar, turn that plugin's switch off, and save: it disappears from the page and no preset can change it.
 
 ## Directory structure
 

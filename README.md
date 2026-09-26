@@ -94,34 +94,30 @@ dsh plugin --profile web add dsh-preset-manager
 
 ## 可操纵插件白名单
 
-页面**只显示和切换 `manage` 列表里的插件**，配置档里的其它插件作为底层插件被完整排除：
+页面**默认只显示和切换你自己安装的插件**，不需要维护任何名单：
 
-- 默认白名单：`dsh-whale-widget`、`dsh-archive-manager`、`dshmarket`；
-- 匹配方式：**包名 / Loader entry id / 补丁行 id** 任一命中即可；
-- 白名单之外的插件：
-  - 不出现在三个选项卡里；
-  - 不会被应用预设、全局保存、批量切换改动；
-  - 每次读取状态时连同 `entryId`、包名、补丁行 id、当前开关、是否只读写入 `excluded-plugins.json`，作为排除清单留档；
-  - 客户端提交的预设或全局列表里若混入白名单外的 id，服务端一律丢弃。
+- **系统插件必然排除**：DSH 安装自带的那 180 多行（`@deepseek-ai/…`、`cordis:…`）承载着应用本体、设置页和 HTTP 服务，
+  永远不出现在页面里，也不会被任何预设切换；
+- **其余插件默认识别**：配置档 `package.json` 里声明为依赖的包（也就是你用 `dsh plugin` 装进来的插件）自动全部可操纵；
+- **判断依据是安装来源，不是名字**：所以新装一个插件，页面自动就能管它，无需改配置。
 
-改白名单：在配置档 `cordis.patch.yml` 里给本插件的行加配置（这一层是用户层，升级插件不会丢）：
+页面顶部有 **「白名单」** 按钮，用来在识别到的插件里做取舍：
 
-```yaml
-- id: preset-manager
-  config:
-    manage:
-      - dsh-whale-widget
-      - dsh-archive-manager
-      - dshmarket
-      - 你自己的插件包名
-```
+- 每个识别到的插件一行开关，默认可操纵；关掉某个开关即把它**排除**在页面之外（既不显示，也不会被预设/全局列表改动）；
+- 再打开即恢复；
+- 保存后写入 `config.json` 的 `manage.exclude`；页面顶部汇总会显示「可操纵 n 个 ｜ 系统插件 m 个必然排除 ｜ 白名单排除 k 个」；
+- 系统插件不在此列，也**不能**通过界面纳入 —— 这是刻意的：本地实测过「预设关掉 `web-startup`，`webserver` 随之停摆、整页消失」。
+
+被排除的插件每次都写入 `excluded-plugins.json`，带 `reason`（`system` / `whitelist`），可直接拿它审计。
+
+顶部还有一个 **「刷新」** 按钮：重新读取当前插件列表（新装/卸载插件后点一下即可，不用重开设置页）。
 
 ## 数据与持久化
 
 | 文件 | 内容 |
 |---|---|
-| `$DSH_HOME/dsh-preset-manager/config.json` | 预设列表、全局集合、当前激活预设 |
-| `$DSH_HOME/dsh-preset-manager/excluded-plugins.json` | 被排除的底层插件清单 |
+| `$DSH_HOME/dsh-preset-manager/config.json` | 预设列表、全局集合、当前激活预设、白名单排除项 |
+| `$DSH_HOME/dsh-preset-manager/excluded-plugins.json` | 被排除的插件清单（带 `reason`：`system` / `whitelist`） |
 
 插件的启用/禁用一次性批量写入配置档的 `cordis.patch.yml`，由 HMR 观察者协调一次后即时生效，无需重启。
 内置预设「全部插件开启」是虚拟的（`all-on`），不写入配置文件。
@@ -150,7 +146,7 @@ dsh plugin --profile web add dsh-preset-manager
 点「全部插件开启」卡片即可。
 
 **我不想让它碰某个插件**
-把该插件从 `manage` 里去掉，它就变回底层插件，页面完全不显示、也不会切换它。
+点顶部「白名单」，把这个插件的开关关掉并保存，它就不会出现在页面里，也不会被任何预设切换。
 
 ## 目录结构
 

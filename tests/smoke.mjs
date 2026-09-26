@@ -11,6 +11,27 @@ import assert from 'node:assert/strict'
 const home = mkdtempSync(join(tmpdir(), 'dsh-preset-manager-'))
 process.env.DSH_HOME = home
 
+/**
+ * A fake profile whose manifest decides what the page recognizes: everything
+ * it names is a plugin the person installed, everything else is DSH's own.
+ */
+const profileDir = mkdtempSync(join(tmpdir(), 'dsh-preset-profile-'))
+writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+  name: 'dsh-profile-test',
+  private: true,
+  dependencies: {
+    alpha: '1.0.0',
+    beta: '1.0.0',
+    gamma: '1.0.0',
+    'dsh-preset-manager': 'link:.',
+    locked: '1.0.0',
+    delta: '1.0.0',
+    zeta: '1.0.0',
+    // A survival row a profile installed by accident stays excluded anyway.
+    '@deepseek-ai/dsh-web-app/startup': '1.0.0',
+  },
+}, undefined, 1))
+
 const module = await import('../index.js')
 
 /** Entries this fake profile reports, mutated by setPluginEnabled. */
@@ -24,11 +45,8 @@ const entries = [
   { entryId: 'include:other', moduleName: 'other-plugin', enabled: true, fiberPhase: 'active', patchId: 'other' },
 ]
 
-/** Packages the page may switch; `other-plugin` is the lower layer it must leave alone. */
-const MANAGE = [
-  'alpha', 'beta', 'gamma', 'dsh-preset-manager', '@deepseek-ai/dsh-web-app/startup',
-  'locked', 'delta', 'zeta',
-]
+/** The recognized packages, in the order the fixture declares them. */
+const RECOGNIZED = ['alpha', 'beta', 'gamma', 'dsh-preset-manager', 'locked']
 
 const calls = []
 const manager = {
@@ -59,7 +77,9 @@ const ctx = {
     },
   },
   get(name) {
-    return name === 'pluginManager' ? manager : undefined
+    if (name === 'pluginManager') return manager
+    if (name === 'profileContext') return { dir: profileDir }
+    return undefined
   },
   effect(factory, label) {
     const dispose = factory()
@@ -71,9 +91,9 @@ const ctx = {
   },
 }
 
-module.apply(ctx, { manage: MANAGE })
+module.apply(ctx)
 
-assert.equal(routes.size, 8, 'every route is mounted')
+assert.equal(routes.size, 9, 'every route is mounted')
 assert.deepEqual(listeners.map(([name]) => name), ['plugin-manager/changed'])
 
 /** One request against the mounted routes. */
@@ -103,21 +123,40 @@ async function call(action, body) {
 let state = await call('state')
 assert.equal(state.ok, true)
 assert.equal(state.pluginManagerAvailable, true)
-assert.equal(state.plugins.length, 6)
+// Everything the profile installed is recognized; nothing else is.
+assert.deepEqual(state.plugins.map((plugin) => plugin.moduleName), RECOGNIZED)
+assert.deepEqual(state.catalog.map((entry) => entry.package), RECOGNIZED)
+assert.equal(state.catalog.every((entry) => entry.operable === true), true)
+assert.deepEqual(state.whitelist, { exclude: [] })
 assert.deepEqual(state.presets, [])
 assert.equal(state.activePresetId, null)
 assert.equal(state.publicOn.length, 0)
 assert.deepEqual(state.plugins[0].title, { en: 'Alpha', zh: '阿尔法' })
-assert.equal(state.plugins.find((plugin) => plugin.id === 'include:web-startup').system, true)
-// The lower layer is excluded from every operable surface and reported in its own file.
-assert.equal(state.excluded, 1)
+// The DSH-supplied rows, and a survival row even when the profile names it, are necessarily excluded.
 assert.equal(state.plugins.some((plugin) => plugin.moduleName === 'other-plugin'), false)
+assert.equal(state.plugins.some((plugin) => plugin.moduleName.includes('dsh-web-app')), false)
+assert.equal(state.systemExcluded, 2)
+assert.equal(state.excluded, 2)
 const excludedReport = JSON.parse(readFileSync(join(home, 'dsh-preset-manager', 'excluded-plugins.json'), 'utf8'))
-assert.equal(excludedReport.count, 1)
-assert.deepEqual(excludedReport.plugins, [
-  { entryId: 'include:other', moduleName: 'other-plugin', patchId: 'other', enabled: true, readOnly: false },
+assert.equal(excludedReport.count, 2)
+assert.equal(excludedReport.systemCount, 2)
+assert.deepEqual(excludedReport.plugins.map((entry) => [entry.moduleName, entry.reason]), [
+  ['@deepseek-ai/dsh-web-app/startup', 'system'],
+  ['other-plugin', 'system'],
 ])
-assert.deepEqual(excludedReport.manage, MANAGE)
+assert.deepEqual(excludedReport.whitelist, { exclude: [] })
+
+// 1b. The whitelist route leaves a recognized plugin out and restores it.
+let whitelisted = await call('whitelist', { exclude: ['beta', 'not-installed'] })
+assert.equal(whitelisted.ok, true)
+assert.deepEqual(whitelisted.whitelist, { exclude: ['beta'] }, 'a name no recognized row carries is dropped')
+assert.equal(whitelisted.plugins.some((plugin) => plugin.moduleName === 'beta'), false)
+assert.equal(whitelisted.excluded, 3)
+assert.equal(whitelisted.catalog.find((entry) => entry.package === 'beta').operable, false)
+state = await call('state')
+assert.equal(state.plugins.some((plugin) => plugin.moduleName === 'beta'), false)
+whitelisted = await call('whitelist', { exclude: [] })
+assert.equal(whitelisted.plugins.some((plugin) => plugin.moduleName === 'beta'), true)
 
 // 2. Create a preset: every plugin starts off.
 let created = await call('create', { name: 'Work' })
@@ -125,7 +164,7 @@ assert.equal(created.ok, true)
 const presetId = created.preset.id
 assert.equal(created.preset.pluginStates['include:alpha'], false)
 assert.equal(created.preset.pluginStates['include:preset-manager'], true)
-assert.equal(created.preset.pluginStates['include:web-startup'], true)
+assert.equal(created.preset.pluginStates['include:web-startup'], undefined, 'a survival row is never in a preset')
 
 // 3. Two more presets, then save switches on the first.
 await call('create', { name: 'Write' })

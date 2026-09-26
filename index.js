@@ -20,6 +20,17 @@ import { dirname, join } from 'node:path'
 const PACKAGE_NAME = 'dsh-preset-manager'
 /** Loader row id this bundle's patch inserts, matched to pin the manager's own row. */
 const ROW_ID = 'preset-manager'
+/**
+ * A row the page may switch is one the profile itself installed. Every row the
+ * DSH installation supplies is necessarily excluded: those 180-odd rows carry
+ * the application, the settings page, and the HTTP server, so a preset that
+ * could switch them off would remove the only page able to switch them back on.
+ * No hand-maintained list is needed — installation origin decides.
+ *
+ * The durable document may still name recognized plugins to leave out, which is
+ * what the page's own whitelist editor writes.
+ */
+
 /** Route prefix owned by this plugin. */
 const ROUTE_BASE = '/api/preset-manager'
 /** Durable document version; a document with another value is read leniently and rewritten. */
@@ -34,15 +45,6 @@ const MAX_BODY_BYTES = 1024 * 1024
 const SETTLE_TIMEOUT_MS = 90_000
 /** The always-present, never-stored "every plugin on" preset. */
 export const ALL_ON_PRESET_ID = 'all-on'
-
-/**
- * Packages the page may switch, matched against a row's package name, entry id,
- * or patch row id. Every other row in the profile is a lower layer the page
- * neither shows nor touches; the resolved set and the rows it excludes are
- * written beside the durable document. A deployment overrides this default
- * through the row's `config.manage`.
- */
-export const DEFAULT_MANAGE = ['dsh-whale-widget', 'dsh-archive-manager', 'dshmarket']
 
 /**
  * Modules whose absence removes the Settings page or the HTTP carrier that
@@ -68,12 +70,6 @@ export const inject = ['webServer']
 /** Module name of this plugin's Host half. */
 export const name = PACKAGE_NAME
 
-/**
- * The operable set in force. `apply` replaces it from the row's `config.manage`
- * before any route exists, so every read sees one resolved set.
- */
-let manageable = new Set(DEFAULT_MANAGE)
-
 /** The last exclusion report written, so an unchanged one is not rewritten. */
 let excludedSignature = null
 
@@ -95,15 +91,44 @@ function excludedPath() {
 }
 
 /**
- * Whether one inventory row is one the page may switch.
- * @param row Inventory row carrying its entry id, package name, and patch row id.
- * @returns true when the operable set names any of them.
+ * The package a Loader row belongs to: `@scope/name` or `name`. Builtins,
+ * relative specifiers, and other scheme-qualified names belong to no package.
+ * @param specifier Loader row name.
+ * @returns The package root, or undefined when the row names no package.
  */
-function isManageable(row) {
-  const moduleName = typeof row.moduleName === 'string' ? row.moduleName : ''
-  return manageable.has(moduleName)
-    || manageable.has(String(row.entryId))
-    || (typeof row.patchId === 'string' && manageable.has(row.patchId))
+function packageRootOf(specifier) {
+  if (typeof specifier !== 'string' || specifier === '') return undefined
+  if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.includes(':')) return undefined
+  const parts = specifier.split('/')
+  if (specifier.startsWith('@')) {
+    return parts.length >= 2 && parts[0] !== '' && parts[1] !== '' ? `${parts[0]}/${parts[1]}` : undefined
+  }
+  return parts[0] === '' ? undefined : parts[0]
+}
+
+/**
+ * The packages this profile installed itself. Every other row comes from the
+ * DSH installation, which is what makes the exclusion automatic: the page
+ * manages what you added, never the application that runs it.
+ * @param ctx Plugin context carrying `profileContext`.
+ * @returns Installed package names; empty without a readable profile manifest.
+ */
+function installedPackages(ctx) {
+  const profile = ctx.get('profileContext')
+  if (profile === undefined || typeof profile.dir !== 'string') return new Set()
+  try {
+    const manifest = JSON.parse(readFileSync(join(profile.dir, 'package.json'), 'utf8'))
+    const names = new Set()
+    for (const section of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+      const group = manifest[section]
+      if (group === null || typeof group !== 'object') continue
+      for (const entry of Object.keys(group)) names.add(entry)
+    }
+    return names
+  } catch (error) {
+    ctx.logger?.warn(`${PACKAGE_NAME}: cannot read the profile manifest: ${String(error)}`)
+    return new Set()
+  }
 }
 
 /** Keep only plain boolean entries with a non-empty string key. */
@@ -148,7 +173,14 @@ function normalizeConfig(raw) {
   const activePresetId = typeof source.activePresetId === 'string' && source.activePresetId !== ''
     ? source.activePresetId
     : null
-  return { version: CONFIG_VERSION, publicOn, presets, activePresetId }
+  const manage = { exclude: [] }
+  const manageSource = source.manage !== null && typeof source.manage === 'object' ? source.manage : {}
+  if (Array.isArray(manageSource.exclude)) {
+    for (const name of manageSource.exclude) {
+      if (typeof name === 'string' && name !== '' && !manage.exclude.includes(name)) manage.exclude.push(name)
+    }
+  }
+  return { version: CONFIG_VERSION, publicOn, presets, activePresetId, manage }
 }
 
 /** Read the durable document; a missing or unreadable file yields an empty document. */
@@ -296,22 +328,27 @@ function isSelfRow(row) {
 async function listPlugins(ctx) {
   const manager = managerOf(ctx)
   if (manager === undefined) return undefined
+  const installed = installedPackages(ctx)
   const rows = await manager.listPlugins()
   return rows.map((row) => {
     const meta = row.meta ?? {}
+    const moduleName = String(row.moduleName ?? '')
+    const packageName = packageRootOf(moduleName)
     return {
       id: String(row.entryId),
-      moduleName: String(row.moduleName ?? ''),
+      moduleName,
+      package: packageName ?? null,
+      // Installed by this profile, so the page recognizes it without any list.
+      installed: packageName !== undefined && installed.has(packageName),
       patchId: typeof row.patchId === 'string' ? row.patchId : null,
-      title: meta.title ?? String(row.moduleName ?? ''),
+      title: meta.title ?? moduleName,
       description: meta.description ?? '',
       enabled: row.enabled === true,
       fiberPhase: row.fiberPhase ?? null,
       readOnly: row.readOnlyReason !== undefined,
       readOnlyReason: row.readOnlyReason ?? null,
       self: isSelfRow(row),
-      system: SURVIVAL_MODULES.has(String(row.moduleName ?? '')),
-      managed: isManageable(row),
+      system: SURVIVAL_MODULES.has(moduleName),
     }
   })
 }
@@ -397,47 +434,97 @@ function pruneUnmanaged(config, plugins) {
 }
 
 /**
- * Record every entry the page does not manage, so the excluded set is
- * auditable and a later `manage` edit has a list to draw from.
- * @param excluded Entries outside the operable set.
+ * Record every entry the page does not manage, with why, so the excluded set is
+ * auditable without opening the page.
+ * @param entries Excluded rows paired with the reason they are excluded.
+ * @param config Durable document, so the report names the current whitelist.
  */
-function writeExcluded(excluded) {
-  const signature = JSON.stringify(excluded.map((plugin) => [plugin.id, plugin.moduleName, plugin.enabled]))
+function writeExcluded(entries, config) {
+  const signature = JSON.stringify(entries.map(({ plugin, reason }) => [plugin.id, reason, plugin.enabled]))
   if (signature === excludedSignature) return
   excludedSignature = signature
   const document = {
     generatedAt: new Date().toISOString(),
-    manage: [...manageable],
-    count: excluded.length,
-    plugins: excluded.map((plugin) => ({
+    whitelist: { exclude: config.manage.exclude },
+    count: entries.length,
+    systemCount: entries.filter(({ reason }) => reason === 'system').length,
+    plugins: entries.map(({ plugin, reason }) => ({
       entryId: plugin.id,
       moduleName: plugin.moduleName,
+      package: plugin.package,
       patchId: plugin.patchId,
       enabled: plugin.enabled,
       readOnly: plugin.readOnly,
+      reason,
     })),
   }
   writeFileAtomically(excludedPath(), `${JSON.stringify(document, undefined, 2)}\n`)
 }
 
 /**
+ * Partition the inventory into what the page operates and what it leaves alone.
+ *
+ * A row the profile installed is operable unless the document names it; every
+ * row the DSH installation supplies is necessarily excluded. The catalog is the
+ * whitelist editor's data: the recognized rows and whether each is left out.
+ * @param config Durable document.
+ * @param rows Current inventory.
+ * @returns Operable entries, the recognized catalog, and the counts.
+ */
+function partition(config, rows) {
+  const leftOut = new Set(config.manage.exclude)
+  // A survival row stays out even if a profile somehow installed its package:
+  // it carries the Settings page or the HTTP carrier this page answers on.
+  const recognized = rows.filter((plugin) => plugin.installed && !plugin.system)
+  const system = rows.filter((plugin) => !plugin.installed || plugin.system)
+  const operable = recognized.filter((plugin) => plugin.package === null || !leftOut.has(plugin.package))
+  const catalog = recognized.map((plugin) => ({
+    id: plugin.id,
+    package: plugin.package,
+    moduleName: plugin.moduleName,
+    title: plugin.title,
+    enabled: plugin.enabled,
+    operable: plugin.package === null || !leftOut.has(plugin.package),
+  }))
+  return {
+    operable,
+    catalog,
+    system,
+    excluded: [
+      ...system.map((plugin) => ({ plugin, reason: 'system' })),
+      ...recognized
+        .filter((plugin) => plugin.package !== null && leftOut.has(plugin.package))
+        .map((plugin) => ({ plugin, reason: 'whitelist' })),
+    ],
+  }
+}
+
+/**
  * The durable document plus the freshly read inventory, after the new-plugin
- * sync and the unmanaged prune have settled. Only operable rows are returned;
- * the excluded rows are reported to the file beside the document.
+ * sync and the whitelist prune have settled. Only operable rows are returned;
+ * everything left out is reported to the file beside the document.
  * @param ctx Plugin context.
- * @returns The document, the operable entries, and the excluded count.
+ * @returns The document, the operable entries, the catalog, and the counts.
  */
 async function readState(ctx) {
   const config = readConfig(ctx.logger)
   const rows = await listPlugins(ctx)
-  if (rows === undefined) return { config, plugins: [], excluded: 0, managerAvailable: false }
-  const managed = rows.filter((plugin) => plugin.managed)
-  const excluded = rows.filter((plugin) => !plugin.managed)
-  let changed = syncNewPlugins(config, managed)
-  changed = pruneUnmanaged(config, managed) || changed
+  if (rows === undefined) {
+    return { config, plugins: [], catalog: [], excluded: 0, systemExcluded: 0, managerAvailable: false }
+  }
+  const { operable, catalog, system, excluded } = partition(config, rows)
+  let changed = syncNewPlugins(config, operable)
+  changed = pruneUnmanaged(config, operable) || changed
   if (changed) writeConfig(config)
-  writeExcluded(excluded)
-  return { config, plugins: managed, excluded: excluded.length, managerAvailable: true }
+  writeExcluded(excluded, config)
+  return {
+    config,
+    plugins: operable,
+    catalog,
+    excluded: excluded.length,
+    systemExcluded: system.length,
+    managerAvailable: true,
+  }
 }
 
 /**
@@ -573,7 +660,7 @@ async function resumeEnablement(ctx, manager, expected, observed) {
 async function applyPreset(ctx, config, presetId) {
   if (managerOf(ctx) === undefined) return { ok: false, code: 'plugin-manager-unavailable' }
   const rows = await listPlugins(ctx)
-  const plugins = (rows ?? []).filter((plugin) => plugin.managed)
+  const plugins = rows === undefined ? [] : partition(config, rows).operable
   const states = savedStates(config, presetId, plugins)
   if (states === undefined) return { ok: false, code: 'unknown-preset' }
 
@@ -599,21 +686,22 @@ async function applyPreset(ctx, config, presetId) {
   if (presetId !== ALL_ON_PRESET_ID && findPreset(config, presetId) === undefined) activeId = config.activePresetId
   config.activePresetId = activeId
   writeConfig(config)
-  const after = (await listPlugins(ctx) ?? []).filter((plugin) => plugin.managed)
+  const after = await listPlugins(ctx)
+  const operable = after === undefined ? [] : partition(config, after).operable
   return {
     ok: true,
     activePresetId: activeId,
     applied,
     failures,
-    differences: differences(config, after, activeId),
-    plugins: after,
+    differences: differences(config, operable, activeId),
+    plugins: operable,
   }
 }
 
 /** Force-enable every operable plugin the global list names, then persist that list. */
 async function savePublic(ctx, config, nextPublicOn) {
   const rows = await listPlugins(ctx)
-  const plugins = (rows ?? []).filter((plugin) => plugin.managed)
+  const plugins = rows === undefined ? [] : partition(config, rows).operable
   const allowed = new Set(plugins.map((plugin) => plugin.id))
   const kept = nextPublicOn.filter((id) => allowed.has(id))
   const targets = []
@@ -669,19 +757,51 @@ function stringList(value) {
 
 /** Route handler for `GET /state`. */
 async function handleState(ctx, res) {
-  const { config, plugins, excluded, managerAvailable } = await readState(ctx)
+  const { config, plugins, catalog, excluded, systemExcluded, managerAvailable } = await readState(ctx)
   sendJson(res, 200, {
     ok: true,
     pluginManagerAvailable: managerAvailable,
     configPath: configPath(),
     excludedPath: excludedPath(),
     excluded,
-    manage: [...manageable],
+    systemExcluded,
+    catalog,
+    whitelist: config.manage,
     plugins,
     publicOn: config.publicOn,
     presets: config.presets,
     activePresetId: config.activePresetId,
     differences: config.activePresetId === null ? [] : differences(config, plugins, config.activePresetId),
+  })
+}
+
+/**
+ * Route handler for `POST /whitelist`.
+ *
+ * The recognized set is derived, not stored: this route records only the
+ * packages the person left out. Names that no recognized row carries are
+ * dropped, so a stale entry never survives a rename.
+ */
+async function handleWhitelist(ctx, req, res) {
+  const body = await readJson(req)
+  const exclude = stringList(body.exclude)
+  if (exclude === undefined) {
+    sendJson(res, 200, { ok: false, code: 'bad-request' })
+    return
+  }
+  const config = readConfig(ctx.logger)
+  const rows = await listPlugins(ctx)
+  const recognized = new Set((rows ?? []).filter((plugin) => plugin.installed).map((plugin) => plugin.package))
+  config.manage = { exclude: exclude.filter((name) => recognized.has(name)) }
+  writeConfig(config)
+  const state = await readState(ctx)
+  sendJson(res, 200, {
+    ok: true,
+    whitelist: state.config.manage,
+    catalog: state.catalog,
+    plugins: state.plugins,
+    excluded: state.excluded,
+    systemExcluded: state.systemExcluded,
   })
 }
 
@@ -855,13 +975,8 @@ function ctxLogger(res, label, error) {
 /**
  * Mount the preset-management routes and the new-plugin sync listener.
  * @param ctx Plugin context carrying `webServer`.
- * @param config Row config; `manage` replaces the default operable set.
  */
-export function apply(ctx, config) {
-  const configured = config === undefined ? undefined : config.manage
-  if (Array.isArray(configured) && configured.length > 0 && configured.every((entry) => typeof entry === 'string')) {
-    manageable = new Set(configured)
-  }
+export function apply(ctx) {
   excludedSignature = null
 
   const handle = (path, handler, label) => {
@@ -884,6 +999,7 @@ export function apply(ctx, config) {
   }
 
   handle('state', (req, res) => handleState(ctx, res), 'state route')
+  handle('whitelist', (req, res) => handleWhitelist(ctx, req, res), 'whitelist route')
   handle('apply', (req, res) => handleApply(ctx, req, res), 'apply route')
   handle('public', (req, res) => handlePublic(ctx, req, res), 'public route')
   handle('presets', (req, res) => handlePresets(ctx, req, res), 'presets route')
@@ -908,5 +1024,5 @@ export function apply(ctx, config) {
 
 export {
   configPath, excludedPath, normalizeConfig, differences, applyPreset,
-  writeDisabledRows, splitPatchBlocks, isManageable,
+  writeDisabledRows, splitPatchBlocks, packageRootOf, partition,
 }

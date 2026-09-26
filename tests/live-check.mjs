@@ -47,12 +47,18 @@ let state = await call('state')
 assert.equal(state.ok, true)
 assert.equal(state.pluginManagerAvailable, true)
 console.log(`operable: ${state.plugins.map((plugin) => plugin.moduleName).join(', ')}`)
-console.log(`excluded: ${String(state.excluded)} -> ${state.excludedPath}`)
-assert.equal(state.manage.length, 3, 'the default operable set names three packages')
+console.log(`excluded: ${String(state.excluded)} (${String(state.systemExcluded)} system) -> ${state.excludedPath}`)
+// Recognition is derived, not listed: everything installed is operable, nothing else is.
+assert.ok(state.plugins.length > 0, 'the installed plugins are recognized')
+assert.equal(state.catalog.length, state.plugins.length, 'every recognized plugin is operable')
+assert.ok(state.systemExcluded > 100, 'the DSH installation supplies the excluded lower layer')
+assert.equal(state.excluded, state.systemExcluded, 'nothing is left out of the whitelist yet')
+const nonOperable = state.catalog.filter((entry) => entry.operable === false)
+assert.deepEqual(nonOperable, [], 'the whitelist starts empty')
 for (const plugin of state.plugins) {
-  assert.equal(state.manage.includes(plugin.moduleName), true, `${plugin.moduleName} is operable`)
+  assert.equal(typeof plugin.package, 'string', `${plugin.moduleName} names a package`)
+  assert.equal(plugin.installed, true, `${plugin.moduleName} came from the profile`)
 }
-assert.ok(state.excluded > 100, 'the lower layer is excluded')
 
 const byName = (name) => state.plugins.find((plugin) => plugin.moduleName === name)
 const whale = byName('dsh-whale-widget')
@@ -67,12 +73,27 @@ console.log('baseline:', [...baseline].map(([id, on]) => `${id}=${String(on)}`).
 const beforeExcluded = state.excludedPath === undefined ? undefined : excludedReport()
 const beforeStates = new Map(beforeExcluded.plugins.map((plugin) => [plugin.entryId, plugin.enabled]))
 
-// 1. A new preset holds exactly the operable rows, all off.
+// 0. The whitelist route takes a recognized plugin out of the page and puts it back.
+const whitelistBefore = (state.whitelist?.exclude ?? []).slice()
+const leftOut = await call('whitelist', { exclude: [...whitelistBefore, market.package, 'no-such-package'] })
+assert.equal(leftOut.ok, true)
+assert.deepEqual([...leftOut.whitelist.exclude].sort(), [...whitelistBefore, market.package].sort(), 'an unknown name is dropped')
+assert.equal(leftOut.plugins.some((plugin) => plugin.id === market.id), false, 'a left-out package leaves the page')
+assert.equal(leftOut.catalog.find((entry) => entry.package === market.package).operable, false)
+assert.equal(leftOut.excluded, state.excluded + 1)
+const restoredList = await call('whitelist', { exclude: whitelistBefore })
+assert.equal(restoredList.plugins.some((plugin) => plugin.id === market.id), true, 'restoring the whitelist brings it back')
+console.log('whitelist round trip: ok')
+
+// 1. A new preset holds exactly the operable rows; the manager's own row is pinned on.
 const created = await call('create', { name: 'live-check' })
 assert.equal(created.ok, true)
 const presetId = created.preset.id
-assert.deepEqual(Object.keys(created.preset.pluginStates).sort(), [archive.id, market.id, whale.id].sort())
-assert.equal(Object.values(created.preset.pluginStates).every((value) => value === false), true)
+assert.deepEqual(Object.keys(created.preset.pluginStates).sort(), state.plugins.map((plugin) => plugin.id).sort())
+const pinnedIds = new Set(state.plugins.filter((plugin) => plugin.self).map((plugin) => plugin.id))
+for (const [id, value] of Object.entries(created.preset.pluginStates)) {
+  assert.equal(value, pinnedIds.has(id), `${id} starts ${pinnedIds.has(id) ? 'on' : 'off'}`)
+}
 
 // 2. Save a draft that keeps only the widget on; an unknown row is dropped.
 const draft = await call('state')

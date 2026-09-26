@@ -73,7 +73,16 @@ window.__ModuleLoader__.load({
       copyFailures: '复制报错信息',
       copied: '已复制',
       configFile: '配置文件',
-      excludedNote: '可操纵插件 {n} 个；另有 {excluded} 个底层插件已排除，清单见 {path}',
+      excludedNote: '可操纵插件 {n} 个 ｜ 系统插件 {system} 个必然排除 ｜ 白名单排除 {left} 个 ｜ 清单：{path}',
+      whitelist: '白名单',
+      refresh: '刷新',
+      refreshHint: '重新读取当前插件列表',
+      whitelistTitle: '白名单',
+      whitelistHint: '系统插件（{system} 个）必然排除，不在此列。下面是你安装的 {n} 个插件，默认可操纵；关掉某个开关即可把它排除在页面之外。',
+      whitelistEmpty: '当前配置档没有安装任何第三方插件。',
+      whitelistOperable: '可操纵',
+      whitelistLeftOut: '已排除',
+      whitelistSaved: '白名单已保存。',
       managerUnavailable: '当前配置档没有启用插件管理器，无法切换插件。',
       dragHint: '拖拽调整顺序',
       presetName: '预设名称',
@@ -134,7 +143,16 @@ window.__ModuleLoader__.load({
       copyFailures: 'Copy the report',
       copied: 'Copied',
       configFile: 'Config file',
-      excludedNote: '{n} plugins are operable; {excluded} lower-layer plugins are excluded, listed in {path}',
+      excludedNote: '{n} operable ｜ {system} system plugins necessarily excluded ｜ {left} left out by the whitelist ｜ list: {path}',
+      whitelist: 'Whitelist',
+      refresh: 'Refresh',
+      refreshHint: 'Re-read the current plugin list',
+      whitelistTitle: 'Whitelist',
+      whitelistHint: 'The {system} system plugins are necessarily excluded and are not listed here. These are the {n} plugins you installed; each is operable by default, and turning one off leaves it out of the page.',
+      whitelistEmpty: 'This profile has no third-party plugins installed.',
+      whitelistOperable: 'Operable',
+      whitelistLeftOut: 'Left out',
+      whitelistSaved: 'Whitelist saved.',
       managerUnavailable: 'This profile has no plugin manager, so plugins cannot be switched.',
       dragHint: 'Drag to reorder',
       presetName: 'Preset name',
@@ -583,6 +601,44 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', style: { ...S.button, ...S.buttonPrimary }, onClick: onSave, disabled: busy }, t('save')))))
     }
 
+    /**
+     * Whitelist editor: the recognized plugins and whether each stays operable.
+     * System plugins are not listed because no preset may switch them.
+     */
+    function WhitelistDialog(props) {
+      const { t, lang, catalog, systemExcluded, draft, onToggle, onCancel, onSave, busy } = props
+      const leftOut = draft.size
+      const rows = catalog.map((entry) => {
+        const operable = !draft.has(entry.package)
+        return h('div', { key: entry.id, style: S.switchRow },
+          h('span', { style: S.switchLabel, title: entry.moduleName }, text(entry.title, lang) || entry.moduleName),
+          h('span', { style: S.switchNote }, operable ? t('whitelistOperable') : t('whitelistLeftOut')),
+          h(Toggle, {
+            checked: operable,
+            disabled: busy,
+            label: text(entry.title, lang) || entry.moduleName,
+            onChange: (next) => onToggle(entry.package, next),
+          }))
+      })
+      return h(Modal, {
+        title: t('whitelistTitle'),
+        onCancel,
+        actions: [
+          h('button', { key: 'cancel', type: 'button', style: S.button, onClick: onCancel, disabled: busy }, t('cancel')),
+          h('button', {
+            key: 'ok', type: 'button', style: { ...S.button, ...S.buttonPrimary },
+            onClick: onSave, disabled: busy,
+          }, t('save')),
+        ],
+      },
+      h('div', { style: { ...S.dialogBody, marginBottom: 10 } },
+        t('whitelistHint', { system: systemExcluded, n: catalog.length })),
+      catalog.length === 0
+        ? h('div', { style: S.center }, t('whitelistEmpty'))
+        : h('div', { style: S.list }, rows),
+      h('div', { style: S.switchNote }, leftOut === 0 ? '' : `${t('whitelistLeftOut')} ${String(leftOut)}`))
+    }
+
     // ---- page ----
 
     function PresetManagerPage(props) {
@@ -600,7 +656,7 @@ window.__ModuleLoader__.load({
       const [view, setView] = React.useState({
         status: 'loading', error: null, plugins: [], publicOn: [], presets: [],
         activePresetId: null, differences: [], configPath: '', excludedPath: '',
-        excluded: 0, managerAvailable: true,
+        excluded: 0, systemExcluded: 0, catalog: [], whitelist: { exclude: [] }, managerAvailable: true,
       })
       const [tab, setTab] = React.useState('switch')
       const [publicDraft, setPublicDraft] = React.useState(null)
@@ -614,6 +670,8 @@ window.__ModuleLoader__.load({
       const [copied, setCopied] = React.useState(false)
       const [drift, setDrift] = React.useState([])
       const [dragOver, setDragOver] = React.useState(null)
+      const [whitelistDraft, setWhitelistDraft] = React.useState(null)
+      const [refreshing, setRefreshing] = React.useState(false)
       const dragId = React.useRef(null)
 
       /** Re-read the Host document; `detect` also refreshes the switch tab's drift comparison. */
@@ -629,6 +687,9 @@ window.__ModuleLoader__.load({
             activePresetId: response.activePresetId ?? null, differences: response.differences ?? [],
             configPath: response.configPath ?? '', excludedPath: response.excludedPath ?? '',
             excluded: typeof response.excluded === 'number' ? response.excluded : 0,
+            systemExcluded: typeof response.systemExcluded === 'number' ? response.systemExcluded : 0,
+            catalog: response.catalog ?? [],
+            whitelist: response.whitelist ?? { exclude: [] },
             managerAvailable: response.pluginManagerAvailable !== false,
           })
           if (detect) setDrift(response.differences ?? [])
@@ -653,6 +714,38 @@ window.__ModuleLoader__.load({
         else setPublicDraft(null)
         if (next === 'presets') setPresetDraft(clonePresets(response?.presets ?? []))
         else setPresetDraft(null)
+      }
+
+      /** Re-read the plugin list on demand, without leaving the current tab. */
+      const refresh = async () => {
+        setRefreshing(true)
+        setNotice(null)
+        try {
+          await reload(tab === 'switch')
+        } finally {
+          setRefreshing(false)
+        }
+      }
+
+      /** Save the whitelist: only the recognized packages left out are stored. */
+      const saveWhitelist = async () => {
+        const draft = whitelistDraft ?? new Set()
+        setBusy(true)
+        setNotice(null)
+        try {
+          const response = await api('whitelist', { exclude: [...draft] })
+          if (response?.ok !== true) {
+            setNotice(t('saveFailed', { code: String(response?.code ?? 'unknown') }))
+            return
+          }
+          setWhitelistDraft(null)
+          setNotice(t('whitelistSaved'))
+          await reload(tab === 'switch')
+        } catch (error) {
+          setNotice(t('saveFailed', { code: String(error && error.message ? error.message : error) }))
+        } finally {
+          setBusy(false)
+        }
       }
 
       const applyPreset = async (presetId) => {
@@ -835,6 +928,9 @@ window.__ModuleLoader__.load({
           onConfirm: (name) => { void renamePreset(dialog.preset, name) },
         })
 
+      /** Recognized plugins the whitelist leaves out, for the summary line. */
+      const leftOutCount = (view.catalog ?? []).filter((entry) => entry.operable === false).length
+
       const body = view.status === 'loading'
         ? h('div', { style: S.center }, '…')
         : view.status === 'error'
@@ -851,8 +947,22 @@ window.__ModuleLoader__.load({
                   onClick: () => { void openTab(id) },
                 }, label))),
             !view.managerAvailable ? h('p', { style: { ...S.hint, color: T.danger } }, t('managerUnavailable')) : null,
-            h('p', { style: { ...S.rowMeta, whiteSpace: 'normal', marginBottom: 10 } },
-              t('excludedNote', { n: view.plugins.length, excluded: view.excluded, path: view.excludedPath })),
+            h('div', { style: S.toolbar },
+              h('button', {
+                type: 'button', style: S.button, disabled: busy || refreshing,
+                onClick: () => setWhitelistDraft(new Set(view.whitelist?.exclude ?? [])),
+              }, t('whitelist')),
+              h('button', {
+                type: 'button', style: S.button, disabled: refreshing || busy, title: t('refreshHint'),
+                onClick: () => { void refresh() },
+              }, refreshing ? '…' : t('refresh')),
+              h('span', { style: { ...S.rowMeta, marginLeft: 'auto', whiteSpace: 'normal', textAlign: 'right' } },
+                t('excludedNote', {
+                  n: view.plugins.length,
+                  system: view.systemExcluded,
+                  left: leftOutCount,
+                  path: view.excludedPath,
+                }))),
             notice === null ? null : h('p', { style: S.notice }, notice),
             tab === 'switch'
               ? h(SwitchTab, {
@@ -919,7 +1029,22 @@ window.__ModuleLoader__.load({
         body,
         view.configPath === '' ? null : h('p', { style: { ...S.rowMeta, marginTop: 14, whiteSpace: 'normal' } }, `${t('configFile')}: ${view.configPath}`),
         failNode,
-        dialogNode)
+        dialogNode,
+        whitelistDraft === null ? null : h(WhitelistDialog, {
+          t, lang,
+          catalog: view.catalog ?? [],
+          systemExcluded: view.systemExcluded,
+          draft: whitelistDraft,
+          busy,
+          onToggle: (name, operable) => setWhitelistDraft((current) => {
+            const next = new Set(current ?? [])
+            if (operable) next.delete(name)
+            else next.add(name)
+            return next
+          }),
+          onCancel: () => setWhitelistDraft(null),
+          onSave: () => { void saveWhitelist() },
+        }))
     }
 
     /** Rename dialog: keeps the input private state and closes on Escape through Modal. */
