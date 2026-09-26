@@ -100,10 +100,10 @@ assert.equal(state.plugins.find((plugin) => plugin.id === archive.id).enabled, f
 assert.equal(state.plugins.find((plugin) => plugin.id === market.id).enabled, false)
 console.log(`applied: widget on, archive and market off (${String(expectedApplied)} rows moved)`)
 
-// 4. The shared list accepts only operable rows.
-const shared = await call('public', { publicOn: [archive.id, 'include:session'] })
-assert.equal(shared.ok, true)
-assert.deepEqual(shared.publicOn, [archive.id], 'an unmanaged row never becomes shared')
+// 4. The global list accepts only operable rows.
+const globalList = await call('public', { publicOn: [archive.id, 'include:session'] })
+assert.equal(globalList.ok, true)
+assert.deepEqual(globalList.publicOn, [archive.id], 'an unmanaged row never becomes global')
 state = await call('state')
 assert.equal(state.plugins.find((plugin) => plugin.id === archive.id).enabled, true)
 

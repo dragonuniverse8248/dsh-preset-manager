@@ -140,7 +140,7 @@ assert.equal(saved.ok, true)
 state = await call('state')
 assert.equal(state.presets[0].pluginStates['include:beta'], false)
 
-// 4. Save the shared list, which force-enables its members.
+// 4. Save the global list, which force-enables its members.
 let publicResult = await call('public', { publicOn: ['include:gamma'] })
 assert.equal(publicResult.ok, true)
 assert.equal(entries.find((entry) => entry.moduleName === 'gamma').enabled, true)
@@ -149,7 +149,7 @@ assert.deepEqual(state.publicOn, ['include:gamma'])
 // gamma saved false in every preset while actually on: the active preset is unset, so no drift yet.
 assert.equal(state.differences.length, 0)
 
-// 5. Apply the first preset. gamma stays on (shared), beta goes off, manager row pinned on.
+// 5. Apply the first preset. gamma stays on (global), beta goes off, manager row pinned on.
 calls.length = 0
 let applied = await call('apply', { presetId })
 assert.equal(applied.ok, true)
@@ -157,7 +157,7 @@ assert.equal(applied.activePresetId, presetId)
 assert.deepEqual(calls, [['include:beta', false]])
 assert.equal(entries.find((entry) => entry.moduleName === 'beta').enabled, false)
 assert.equal(entries.find((entry) => entry.moduleName === 'dsh-preset-manager').enabled, true)
-// The shared plugin is saved off but actually on, so this preset now reports drift.
+// The global plugin is saved off but actually on, so this preset now reports drift.
 assert.deepEqual(applied.differences.map((entry) => entry.id), ['include:gamma'])
 assert.equal(applied.failures.length, 0)
 

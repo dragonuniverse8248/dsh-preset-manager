@@ -8,11 +8,11 @@
 
 It adds a **Presets** page under **Settings** with three tabs:
 
-- **Switch** — two short tiles per row (same height as the built-in "All plugins on" row). Clicking a tile applies
+- **Modes** — two short tiles per row (same height as the built-in "All plugins on" row). Clicking a tile applies
   that preset immediately. The active preset is highlighted blue, or orange when its saved switches no longer match
   the running tree.
-- **Shared** — a force-on set. Shared plugins stay on in every preset, their per-preset switch renders grey and
-  locked, and the stored preset data is never rewritten by sharing.
+- **Global** — a force-on set. Global plugins stay on in every preset, their per-preset switch renders grey and
+  locked, and the stored preset data is never rewritten by the global list.
 - **Presets** — an accordion list, one preset per row, click a row to expand its switches. Reorder by dragging
   (saved on drop); switch edits are saved with **Save**. Delete asks for confirmation, rename opens a dialog and
   appends a number when the name is taken.
@@ -38,7 +38,7 @@ lower layer it never touches.
 
 - Default: `dsh-whale-widget`, `dsh-archive-manager`, `dshmarket`.
 - A row matches by **package name, loader entry id, or patch row id**.
-- Excluded rows never appear in the page, are never switched by an apply or a shared-list save, and are collected
+- Excluded rows never appear in the page, are never switched by an apply or a global-list save, and are collected
   into `excluded-plugins.json` together with their entry id, package name, patch row id, current enablement, and
   read-only flag.
 - Entry ids outside the allowlist that arrive from a client draft are dropped server-side.
@@ -59,7 +59,7 @@ Override the list from the profile's own `cordis.patch.yml`:
 
 | File | Contents |
 |---|---|
-| `$DSH_HOME/dsh-preset-manager/config.json` | presets, shared set, active preset |
+| `$DSH_HOME/dsh-preset-manager/config.json` | presets, global set, active preset |
 | `$DSH_HOME/dsh-preset-manager/excluded-plugins.json` | the lower-layer plugins that are excluded |
 
 Enablement changes are written into the profile's `cordis.patch.yml` in one batch, then reconciled once by the HMR

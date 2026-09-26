@@ -47,7 +47,7 @@ export const DEFAULT_MANAGE = ['dsh-whale-widget', 'dsh-archive-manager', 'dshma
 /**
  * Modules whose absence removes the Settings page or the HTTP carrier that
  * serves it, so a preset that disabled one would leave no page able to
- * re-enable anything. They are pinned on exactly like the shared list.
+ * re-enable anything. They are pinned on exactly like the global list.
  */
 const SURVIVAL_MODULES = new Set([
   '@deepseek-ai/dsh-web-app/startup',
@@ -332,7 +332,7 @@ function savedStates(config, presetId, plugins) {
   return preset === undefined ? undefined : preset.pluginStates
 }
 
-/** A plugin the manager must never disable: the shared set, a survival row, and this package's own row. */
+/** A plugin the manager must never disable: the global set, a survival row, and this package's own row. */
 function isPinned(config, plugin) {
   return plugin.self || plugin.system || config.publicOn.includes(plugin.id)
 }
@@ -610,7 +610,7 @@ async function applyPreset(ctx, config, presetId) {
   }
 }
 
-/** Force-enable every operable plugin the shared list names, then persist that list. */
+/** Force-enable every operable plugin the global list names, then persist that list. */
 async function savePublic(ctx, config, nextPublicOn) {
   const rows = await listPlugins(ctx)
   const plugins = (rows ?? []).filter((plugin) => plugin.managed)
@@ -765,7 +765,7 @@ async function handleCreate(ctx, req, res) {
   const config = readConfig(ctx.logger)
   const { plugins } = await readState(ctx)
   // Every plugin starts off except the pinned ones, whose stored value agrees
-  // with the "on" the page shows for them under a shared or self-protected row.
+  // with the "on" the page shows for them under a global or self-protected row.
   // An unaddressable row keeps what it actually does, since no preset can move it.
   const pluginStates = {}
   for (const plugin of plugins ?? []) pluginStates[plugin.id] = plugin.readOnly ? plugin.enabled : isPinned(config, plugin)
