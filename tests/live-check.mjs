@@ -60,6 +60,15 @@ for (const plugin of state.plugins) {
   assert.equal(plugin.installed, true, `${plugin.moduleName} came from the profile`)
 }
 
+// An aborted earlier run can leave its own presets behind; always start clean,
+// so a failure here never costs the caller a preset it has to remove by hand.
+const stale = state.presets.filter((preset) => preset.name === 'live-check' || preset.name === 'live-check-restore')
+for (const preset of stale) await call('delete', { id: preset.id })
+if (stale.length > 0) {
+  state = await call('state')
+  console.log(`removed ${String(stale.length)} preset(s) left by an earlier run`)
+}
+
 const byName = (name) => state.plugins.find((plugin) => plugin.moduleName === name)
 const whale = byName('dsh-whale-widget')
 const archive = byName('dsh-archive-manager')
